@@ -82,8 +82,9 @@ class CognitoUser {
   Future<CognitoUserSession?> _authenticateUserInternal(
       dataAuthenticate, AuthenticationHelper authenticationHelper) async {
     final String? challengeName = dataAuthenticate['ChallengeName'];
-
+    print('challengeName $challengeName');
     var challengeParameters = dataAuthenticate['ChallengeParameters'];
+    print('challengeParameters $challengeParameters');
 
     if (challengeName == 'SMS_MFA') {
       _session = dataAuthenticate['Session'];
@@ -498,8 +499,12 @@ class CognitoUser {
     if (authenticationFlowType == 'USER_PASSWORD_AUTH') {
       return await _authenticateUserPlainUsernamePassword(authDetails);
     } else if (authenticationFlowType == 'USER_SRP_AUTH' ||
-        authenticationFlowType == 'CUSTOM_AUTH') {
+        (authenticationFlowType == 'CUSTOM_AUTH' &&
+            authDetails.getPassword() != null)) {
       return await _authenticateUserDefaultAuth(authDetails);
+    } else if (authenticationFlowType == 'CUSTOM_AUTH' &&
+        authDetails.getPassword() == null) {
+      return await _authenticateUserPasswordlessAuth(authDetails);
     }
     throw UnimplementedError('Authentication flow type is not supported.');
   }
@@ -560,6 +565,155 @@ class CognitoUser {
     return _authenticateUserInternal(authResult, authenticationHelper);
   }
 
+  Future<CognitoUserSession?> _authenticateUserPasswordlessAuth(
+    AuthenticationDetails authDetails,
+  ) async {
+    final authenticationHelper = AuthenticationHelper(
+      pool.getUserPoolId().split('_')[1],
+    );
+    final authParameters = {};
+    authParameters['USERNAME'] = username;
+    final params = {
+      'AuthFlow': authenticationFlowType,
+      'ClientId': pool.getClientId(),
+      'AuthParameters': authParameters,
+      'ClientMetadata': authDetails.getValidationData(),
+    };
+    if (getUserContextData() != null) {
+      params['UserContextData'] = getUserContextData();
+    }
+    dynamic data;
+    try {
+      data = await client!.request(
+          'InitiateAuth', await _analyticsMetadataParamsDecorator.call(params));
+    } on CognitoClientException catch (e) {
+      if (e.name == 'UserNotConfirmedException') {
+        throw CognitoUserConfirmationNecessaryException();
+      } else {
+        rethrow;
+      }
+    } catch (e) {
+      rethrow;
+    }
+
+    final challengeParameters = data;
+
+    print("Challange Params! ");
+    print(data);
+
+    // String srpUsername = challengeParameters['USER_ID_FOR_SRP'];
+    // serverBValue = BigInt.parse(challengeParameters['SRP_B'], radix: 16);
+    // saltString =
+    //     authenticationHelper.toUnsignedHex(challengeParameters['SALT']);
+    // salt = BigInt.parse(saltString, radix: 16);
+
+    // var hkdf = authenticationHelper.getPasswordAuthenticationKey(
+    //   srpUsername,
+    //   authDetails.getPassword(),
+    //   serverBValue,
+    //   salt,
+    // );
+
+    // final dateNow = dateHelper.getNowString();
+
+    // final signature = Hmac(sha256, hkdf);
+    // final signatureData = <int>[];
+    // signatureData
+    //   ..addAll(utf8.encode(pool.getUserPoolId().split('_')[1]))
+    //   ..addAll(utf8.encode(srpUsername))
+    //   ..addAll(base64.decode(challengeParameters['SECRET_BLOCK']))
+    //   ..addAll(utf8.encode(dateNow));
+    // final dig = signature.convert(signatureData);
+    // final signatureString = base64.encode(dig.bytes);
+
+    // final challengeResponses = {
+    //   'USERNAME': srpUsername,
+    //   'PASSWORD_CLAIM_SECRET_BLOCK': challengeParameters['SECRET_BLOCK'],
+    //   'TIMESTAMP': dateNow,
+    //   'PASSWORD_CLAIM_SIGNATURE': signatureString,
+    // };
+
+    // if (_deviceKey != null) {
+    //   challengeResponses['DEVICE_KEY'] = _deviceKey;
+    // }
+
+    // if (_clientSecretHash != null) {
+    //   // Update client hash with the response from the auth challenge
+    //   _clientSecretHash = calculateClientSecretHash(
+    //     srpUsername,
+    //     pool.getClientId()!,
+    //     _clientSecret!,
+    //   );
+
+    //   challengeResponses['SECRET_HASH'] = _clientSecretHash;
+    // }
+
+    // Future<dynamic> respondToAuthChallenge(challenge) async {
+    //   dynamic dataChallenge;
+    //   try {
+    //     dataChallenge =
+    //         await client!.request('RespondToAuthChallenge', challenge);
+    //   } on CognitoClientException catch (e) {
+    //     if (e.code == 'ResourceNotFoundException' &&
+    //         e.message!.toLowerCase().contains('device')) {
+    //       challengeResponses['DEVICE_KEY'] = null;
+    //       _deviceKey = null;
+    //       _randomPassword = null;
+    //       _deviceGroupKey = null;
+    //       await clearCachedDeviceKeyAndPassword();
+    //       return await respondToAuthChallenge(challenge);
+    //     }
+    //     rethrow;
+    //   } catch (e) {
+    //     rethrow;
+    //   }
+    //   return dataChallenge;
+    // }
+
+    // final jsonReqResp = {
+    //   'ChallengeName': 'PASSWORD_VERIFIER',
+    //   'ClientId': pool.getClientId(),
+    //   'ChallengeResponses': challengeResponses,
+    //   'Session': data['Session'],
+    // };
+
+    // if (getUserContextData() != null) {
+    //   jsonReqResp['UserContextData'] = getUserContextData();
+    // }
+
+    // var dataAuthenticate = await respondToAuthChallenge(
+    //     await _analyticsMetadataParamsDecorator.call(jsonReqResp));
+
+    // final challengeName = dataAuthenticate['ChallengeName'];
+    // if (challengeName == 'NEW_PASSWORD_REQUIRED') {
+    //   _session = dataAuthenticate['Session'];
+    //   dynamic userAttributes;
+    //   dynamic rawRequiredAttributes;
+    //   final requiredAttributes = [];
+    //   final userAttributesPrefix = authenticationHelper
+    //       .getNewPasswordRequiredChallengeUserAttributePrefix();
+
+    //   if (dataAuthenticate['ChallengeParameters'] != null) {
+    //     userAttributes = json
+    //         .decode(dataAuthenticate['ChallengeParameters']['userAttributes']);
+    //     rawRequiredAttributes = json.decode(
+    //         dataAuthenticate['ChallengeParameters']['requiredAttributes']);
+    //   }
+
+    //   if (rawRequiredAttributes != null) {
+    //     rawRequiredAttributes.forEach((attribute) {
+    //       requiredAttributes
+    //           .add(attribute.substring(userAttributesPrefix.length));
+    //     });
+    //   }
+
+    //   throw CognitoUserNewPasswordRequiredException(
+    //       userAttributes: userAttributes,
+    //       requiredAttributes: requiredAttributes);
+    // }
+    return _authenticateUserInternal(challengeParameters, authenticationHelper);
+  }
+
   Future<CognitoUserSession?> _authenticateUserDefaultAuth(
     AuthenticationDetails authDetails,
   ) async {
@@ -581,8 +735,7 @@ class CognitoUser {
     final srpA = authenticationHelper.getLargeAValue()!;
     authParameters['SRP_A'] = srpA.toRadixString(16);
 
-    if (authenticationFlowType == 'CUSTOM_AUTH' &&
-        authDetails.getPassword() != null) {
+    if (authenticationFlowType == 'CUSTOM_AUTH') {
       authParameters['CHALLENGE_NAME'] = 'SRP_A';
     }
 
@@ -697,7 +850,7 @@ class CognitoUser {
       jsonReqResp['UserContextData'] = getUserContextData();
     }
 
-    final dataAuthenticate = await respondToAuthChallenge(
+    var dataAuthenticate = await respondToAuthChallenge(
         await _analyticsMetadataParamsDecorator.call(jsonReqResp));
 
     final challengeName = dataAuthenticate['ChallengeName'];
@@ -727,6 +880,7 @@ class CognitoUser {
           userAttributes: userAttributes,
           requiredAttributes: requiredAttributes);
     }
+
     return _authenticateUserInternal(dataAuthenticate, authenticationHelper);
   }
 
@@ -957,7 +1111,7 @@ class CognitoUser {
         ['DeviceKey'];
     await cacheDeviceKeyAndPassword();
     if (dataConfirm['UserConfirmationNecessary'] == true) {
-      throw CognitoUserDeviceConfirmationNecessaryException(
+      throw CognitoUserConfirmationNecessaryException(
           signInUserSession: _signInUserSession);
     }
 
